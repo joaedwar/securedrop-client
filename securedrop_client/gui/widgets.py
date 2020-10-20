@@ -635,12 +635,35 @@ class MainView(QWidget):
         Show conversation for the currently-selected source if it hasn't been deleted. If the
         current source no longer exists, clear the conversation for that source.
         """
-        source = self.source_list.get_selected_source()
-
-        if not source:
+        # Get the currently-selected source, refresh. Return if source has been deleted.
+        try:
+            source = self.source_list.get_selected_source()
+            if not source:
+                return
+            self.controller.session.refresh(source)
+            source_items = source.collection
+        except sqlalchemy.exc.InvalidRequestError as e:
+            logger.debug(e)
             return
 
-        self.controller.session.refresh(source)
+        # Prepare the lists of uuids to mark as seen. Continue if one of the source conversation
+        # items no longer exists so that the rest of the items will be marked as seen.
+        files = []
+        messages = []
+        replies = []
+        for item in source_items:
+            try:
+                if isinstance(item, File):
+                    files.append(item.uuid)
+                elif isinstance(item, Message):
+                    messages.append(item.uuid)
+                elif isinstance(item, Reply):
+                    replies.append(item.uuid)
+            except sqlalchemy.exc.InvalidRequestError as e:
+                logger.debug(e)
+                continue
+            self.controller.mark_seen(files, messages, replies)
+
         # Try to get the SourceConversationWrapper from the persistent dict,
         # else we create it.
         try:
