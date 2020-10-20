@@ -52,7 +52,6 @@ def upgrade():
         FROM replies, users
         WHERE journalist_id=users.uuid;
     """)
-    assert not replies_with_incorrect_associations
 
 
 def downgrade():
