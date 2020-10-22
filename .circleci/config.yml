@@ -65,6 +65,7 @@ common-steps:
       name: Build debian package
       command: |
         cd ~/packaging/securedrop-debian-packaging
+        git checkout mimetype-reorg-for-all
         export PKG_VERSION=1000.0
         export PKG_PATH=/home/circleci/project/dist/securedrop-client-$PKG_VERSION.tar.gz
         make securedrop-client
