@@ -95,6 +95,14 @@ class Source(Base):
             [c for c in self.journalist_designation.lower().replace(" ", "_") if c in valid_chars]
         )
 
+    @property
+    def seen(self) -> bool:
+        for item in self.collection:
+            if not item.seen:
+                return False
+
+        return True
+
 
 class Message(Base):
 
@@ -183,6 +191,17 @@ class Message(Base):
             )
         )
 
+    @property
+    def seen(self) -> bool:
+        """
+        If the submission has been downloaded or seen by any journalist, then the submssion is
+        considered seen.
+        """
+        if self.seen_messages.count():
+            return True
+
+        return False
+
 
 class File(Base):
 
@@ -263,6 +282,17 @@ class File(Base):
                 self.filename,
             )
         )
+
+    @property
+    def seen(self) -> bool:
+        """
+        If the submission has been downloaded or seen by any journalist, then the submssion is
+        considered seen.
+        """
+        if self.seen_files.count():
+            return True
+
+        return False
 
 
 class Reply(Base):
@@ -350,6 +380,13 @@ class Reply(Base):
             )
         )
 
+    @property
+    def seen(self) -> bool:
+        """
+        A reply is always seen in a global inbox.
+        """
+        return True
+
 
 class DownloadErrorCodes(Enum):
     """
@@ -425,6 +462,12 @@ class DraftReply(Base):
     def __repr__(self) -> str:
         return "<DraftReply {}>".format(self.uuid)
 
+    @property
+    def seen(self) -> bool:
+        """
+        A draft reply is always seen in a global inbox.
+        """
+        return True
 
 class ReplySendStatus(Base):
 

@@ -641,28 +641,9 @@ class MainView(QWidget):
             if not source:
                 return
             self.controller.session.refresh(source)
-            source_items = source.collection
         except sqlalchemy.exc.InvalidRequestError as e:
             logger.debug(e)
             return
-
-        # Prepare the lists of uuids to mark as seen. Continue if one of the source conversation
-        # items no longer exists so that the rest of the items will be marked as seen.
-        files = []
-        messages = []
-        replies = []
-        for item in source_items:
-            try:
-                if isinstance(item, File):
-                    files.append(item.uuid)
-                elif isinstance(item, Message):
-                    messages.append(item.uuid)
-                elif isinstance(item, Reply):
-                    replies.append(item.uuid)
-            except sqlalchemy.exc.InvalidRequestError as e:
-                logger.debug(e)
-                continue
-            self.controller.mark_seen(files, messages, replies)
 
         # Try to get the SourceConversationWrapper from the persistent dict,
         # else we create it.
@@ -677,6 +658,7 @@ class MainView(QWidget):
             self.source_conversations[source.uuid] = conversation_wrapper
 
         self.set_conversation(conversation_wrapper)
+        self.source_list.mark_seen.emit(source.uuid)
 
     def delete_conversation(self, source_uuid: str) -> None:
         """
@@ -818,6 +800,8 @@ class SourceList(QListWidget):
 
     NUM_SOURCES_TO_ADD_AT_A_TIME = 32
 
+    mark_seen = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
 
@@ -888,7 +872,7 @@ class SourceList(QListWidget):
 
         # Add widgets for new sources
         for uuid in sources_to_add:
-            source_widget = SourceWidget(self.controller, sources_to_add[uuid])
+            source_widget = SourceWidget(self.controller, sources_to_add[uuid], self.mark_seen)
             source_item = SourceListWidgetItem(self)
             source_item.setSizeHint(source_widget.sizeHint())
             self.insertItem(0, source_item)
@@ -923,7 +907,7 @@ class SourceList(QListWidget):
             for source in sources_slice:
                 try:
                     source_uuid = source.uuid
-                    source_widget = SourceWidget(self.controller, source)
+                    source_widget = SourceWidget(self.controller, source, self.mark_seen)
                     source_item = SourceListWidgetItem(self)
                     source_item.setSizeHint(source_widget.sizeHint())
                     self.insertItem(0, source_item)
@@ -1017,17 +1001,21 @@ class SourceWidget(QWidget):
     PREVIEW_WIDTH = 380
     PREVIEW_HEIGHT = 60
 
-    def __init__(self, controller: Controller, source: Source):
+    SOURCE_CSS = load_css("source.css")
+
+    def __init__(self, controller: Controller, source: Source, mark_seen_signal: pyqtSignal):
         super().__init__()
 
         self.controller = controller
         self.controller.source_deleted.connect(self._on_source_deleted)
         self.controller.source_deletion_failed.connect(self._on_source_deletion_failed)
+        mark_seen_signal.connect(self._on_mark_seen)
 
         # Store source
-        self.source_uuid = source.uuid
-        self.last_updated = source.last_updated
         self.source = source
+        self.seen = self.source.seen
+        self.source_uuid = self.source.uuid
+        self.last_updated = self.source.last_updated
 
         # Set layout
         layout = QHBoxLayout(self)
@@ -1106,6 +1094,9 @@ class SourceWidget(QWidget):
         # Add widgets to main layout
         layout.addWidget(self.source_widget)
 
+        # Set click handler
+        # self.clicked.connect(self._on_clicked)
+
         self.update()
 
     def update(self):
@@ -1123,9 +1114,13 @@ class SourceWidget(QWidget):
             if self.source.document_count == 0:
                 self.paperclip.hide()
             self.star.update(self.source.is_starred)
+
+            self.seen = self.source.seen
+            self.update_styles()
         except sqlalchemy.exc.InvalidRequestError as e:
             logger.debug(f"Could not update SourceWidget for source {self.source_uuid}: {e}")
 
+    @pyqtSlot(str, str, str)
     def set_snippet(self, source_uuid: str, collection_uuid: str = None, content: str = None):
         """
         Update the preview snippet if the source_uuid matches our own.
@@ -1152,6 +1147,58 @@ class SourceWidget(QWidget):
         else:
             messagebox = DeleteSourceMessageBox(self.source, self.controller)
             messagebox.launch()
+
+    def update_styles(self) -> None:
+        if self.seen:
+            self.setStyleSheet("")
+            self.name.setObjectName("SourceWidget_name")
+            self.timestamp.setObjectName("SourceWidget_timestamp")
+            self.preview.setObjectName("SourceWidget_preview")
+            self.setStyleSheet(self.SOURCE_CSS)
+        else:
+            self.setStyleSheet("")
+            self.name.setObjectName("SourceWidget_name_unread")
+            self.timestamp.setObjectName("SourceWidget_timestamp_unread")
+            self.preview.setObjectName("SourceWidget_preview_unread")
+            self.setStyleSheet(self.SOURCE_CSS)
+
+    @pyqtSlot(str)
+    def _on_mark_seen(self, source_uuid: str):
+        if self.source_uuid != source_uuid:
+            return
+
+        # immediately update styles to mark as seen
+        self.seen = True
+        self.update_styles()
+
+        try:
+            if self.source.seen:
+                return
+
+            # Prepare the lists of uuids to mark as seen. Continue if one of the source conversation
+            # items no longer exists so that the rest of the items will be marked as seen.
+            files = []
+            messages = []
+            replies = []
+            source_items = self.source.collection
+            for item in source_items:
+                if item.seen:
+                    continue
+
+                try:
+                    if isinstance(item, File):
+                        files.append(item.uuid)
+                    elif isinstance(item, Message):
+                        messages.append(item.uuid)
+                    elif isinstance(item, Reply):
+                        replies.append(item.uuid)
+                except sqlalchemy.exc.InvalidRequestError as e:
+                    logger.debug(e)
+                    continue
+
+            self.controller.mark_seen(files, messages, replies)
+        except sqlalchemy.exc.InvalidRequestError as e:
+            logger.debug(e)
 
     @pyqtSlot(str)
     def _on_source_deleted(self, source_uuid: str):
